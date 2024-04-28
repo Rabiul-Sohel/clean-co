@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const axios = require('axios')
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
@@ -18,8 +19,7 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-const uri =
-  'mongodb+srv://admin:admin@cluster0.euxm4cs.mongodb.net/?retryWrites=true&w=majority';
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ndy3clf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -31,31 +31,33 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    client.connect();
 
-    const serviceCollection = client.db('clean-co').collection('services');
-    const orderCollections = client.db('clean-co').collection('orders');
-    const bookingCollection = client.db('clean-co').collection('bookings');
+    const serviceCollection = client.db('carDoctor').collection('services');
+    const orderCollections = client.db('carDoctor').collection('orders');
+    const bookingCollection = client.db('carDoctor').collection('bookings');
+    const productCollection = client.db('emaJohnDB').collection('products')
 
     const verifyToken = (req, res, next) => {
       const token = req?.cookies?.token;
-      console.log({ token });
+      // console.log({ token });
       if (!token) {
         return res.status(401).send({ message: 'unauthorized access' });
       }
 
-      jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      jwt.verify(token, process.env.TOKEN_SECRET, (err, decoded) => {
+        // console.log(err, decoded);
         if (err) {
           return res.status(401).send({ message: 'unauthorized access' });
         }
 
-        req.user = decoded;
+        req.user = decoded;  
         next();
       });
     };
 
     // CREATE SERVICE
-    app.post('/api/v1/services', verifyToken, async (req, res) => {
+    app.post('/api/v1/services', async (req, res) => {
       const service = req.body;
       const result = await serviceCollection.insertOne(service);
       res.send(result);
@@ -63,6 +65,7 @@ async function run() {
 
     // GET ALL SERVICES
     app.get('/api/v1/services', async (req, res) => {
+      // console.log(req.cookies);
       const cursor = serviceCollection.find();
       const result = await cursor.toArray();
       res.send(result);
@@ -73,9 +76,9 @@ async function run() {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await serviceCollection.findOne(query);
-      res.send(result);
-    });
-
+      res.send(result);  
+    });  
+  
     // UPDATE SERVICE
     app.patch('/api/v1/services/:id', async (req, res) => {
       const id = req.params.id;
@@ -109,14 +112,16 @@ async function run() {
 
     // GET SINGLE BOOKINGS
     app.get('/api/v1/bookings', verifyToken, async (req, res) => {
-      const userEmail = req.query.email;
+      const userEmail = req.query?.email; 
+      // console.log(userEmail);
+      // console.log(req.user.email);
 
       if (userEmail !== req.user.email) {
         return res
           .status(403)
           .send({ message: 'You are not allowed to access !' });
       }
-      let query = {}; //get all bookings
+      let query = {}; //get all bookings  
       if (req.query?.email) {
         query.email = userEmail;
       }
@@ -131,6 +136,7 @@ async function run() {
       const filter = { _id: new ObjectId(id) };
 
       const updatedBooking = req.body;
+      console.log(updatedBooking);
 
       const updateDoc = {
         $set: {
@@ -148,16 +154,40 @@ async function run() {
       const result = await bookingCollection.deleteOne(query);
       res.send(result);
     });
+    
+    // GET PRODUCTS 
+    app.get('/api/v1/products', async(req, res)=>{
+      const page = parseInt(req.query.page);
+      const limit = parseInt(req.query.limit);
+      const skip = (page - 1) * limit;
+      const totalProducts = await productCollection.countDocuments()
+     
+      const totalPages = Math.ceil(totalProducts / limit)
+      
+      const result = await productCollection.find()
+      .skip(skip)
+      .limit(limit)
+      .toArray()
+      res.send({
+        totalProducts,
+        totalPages,
+        data: result,
 
-    app.post('/api/v1/auth/access-token', async (req, res) => {
+      })   
+    })
+    
+
+    app.post('/api/v1/auth/access-token',  (req, res) => {
+      
       const user = req.body;
-      const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1h' });
-      console.log(token);
-      res
-        .cookie('token', token, {
-          httpOnly: false,
-          secure: true,
+      // console.log(user);
+      const token = jwt.sign(user, process.env.TOKEN_SECRET, {expiresIn: '2h'});
+      res.cookie('token', token, {
+          httpOnly: true,
           sameSite: 'none',
+          expires: new Date(Date.now() + 86400000 * 30),
+          secure:true,
+          maxAge: 1000000000000
         })
         .send({ success: true });
     });
@@ -181,9 +211,9 @@ async function run() {
 
 run().catch(console.dir);
 
-// app.get('/', (req, res) => {
-//   res.send('Hello World!');
-// });
+app.get('/', (req, res) => {
+  res.send('Hello World!');
+});
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
